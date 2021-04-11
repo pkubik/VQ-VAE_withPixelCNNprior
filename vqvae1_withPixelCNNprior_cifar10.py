@@ -109,7 +109,7 @@ print("Data loading is finished...")
 
 #--- Train process - vqvae1
 z = vqvae_nets.encoder(x, num_hiddens, num_residual_layers, num_residual_hiddens)
-with tf.variable_scope('to_vq'):
+with tf.compat.v1.variable_scope('to_vq'):
   z = vqvae_nets.conv2d(z, fmaps=embedding_dim, kernel=1, strides=1)
 vq_output = vq.vector_quantizer(z, embedding_dim, num_embeddings, commitment_cost)
 x_recon = vqvae_nets.decoder(vq_output["quantized"], num_hiddens, num_residual_layers, num_residual_hiddens, image_size, num_channel)

@@ -8,6 +8,9 @@ import networks_vqvae1 as vqvae_nets
 import vector_quantizer as vq
 import networks_pixelcnn as pixelcnn_nets
 
+tf.compat.v1.disable_eager_execution()
+
+
 #--------------------------------------------------------------------------
 # Set hyper-parameters
 save_res_dir = "0820_res_vqvae1_PixelCNN_mnist_K8_D16_gradclip_n20000_lr1e_3_batch100"
@@ -42,9 +45,9 @@ grad_clip_pixelcnn = 1.0
 
 #--------------------------------------------------------------------------
 # Placeholder
-x = tf.placeholder(tf.float32, shape=(None, image_size, image_size, num_channel))
-data_pixelcnn = tf.placeholder(tf.int32, shape=(None, 7, 7)) # Train
-sampled_code_pixelcnn = tf.placeholder(tf.int32, shape=(None, 7, 7)) # Plot
+x = tf.compat.v1.placeholder(tf.float32, shape=(None, image_size, image_size, num_channel))
+data_pixelcnn = tf.compat.v1.placeholder(tf.int32, shape=(None, 7, 7)) # Train
+sampled_code_pixelcnn = tf.compat.v1.placeholder(tf.int32, shape=(None, 7, 7)) # Plot
 
 #--------------------------------------------------------------------------
 # Data
@@ -62,11 +65,10 @@ def convert_batch_to_image_grid(images, image_size=image_size, num_channel=num_c
     return reshaped + 0.5
 
 
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets('MNIST_data')
+(train_data, _), (test_data, _) = tf.keras.datasets.mnist.load_data()
 
-mnist_train_images = mnist.train.images.reshape([-1, 28, 28, 1]) # shape=[55000, 28, 28, 1]
-mnist_test_images = mnist.test.images.reshape([-1, 28, 28, 1])   # shape=[10000, 28, 28, 1]
+mnist_train_images = train_data.reshape([-1, 28, 28, 1]) # shape=[55000, 28, 28, 1]
+mnist_test_images = test_data.reshape([-1, 28, 28, 1])   # shape=[10000, 28, 28, 1]
 
 data_variance = np.var(mnist_train_images)
 
@@ -79,8 +81,8 @@ test_dataset = (tf.data.Dataset.from_tensor_slices(mnist_test_images)
         		.map(cast_and_normalise_images)
         		.repeat()
         		.batch(batch_size))
-train_iterator = train_dataset.make_one_shot_iterator()
-test_iterator  = test_dataset.make_one_shot_iterator()
+train_iterator = tf.compat.v1.data.make_one_shot_iterator(train_dataset)
+test_iterator  = tf.compat.v1.data.make_one_shot_iterator(test_dataset)
 train_dataset_batch_tf = train_iterator.get_next()
 test_dataset_batch_tf  = test_iterator.get_next()
 print("Data loading is finished...")
@@ -91,16 +93,16 @@ print("Data loading is finished...")
 
 #--- Train process - vqvae1
 z = vqvae_nets.encoder(x, num_hiddens, num_residual_layers, num_residual_hiddens)
-with tf.variable_scope('to_vq'):
+with tf.compat.v1.variable_scope('to_vq'):
   z = vqvae_nets.conv2d(z, fmaps=embedding_dim, kernel=1, strides=1)
 vq_output = vq.vector_quantizer(z, embedding_dim, num_embeddings, commitment_cost)
 x_recon = vqvae_nets.decoder(vq_output["quantized"], num_hiddens, num_residual_layers, num_residual_hiddens, image_size, num_channel)
 
 recon_error = tf.reduce_mean((x_recon - x)**2) / data_variance  # Normalized MSE
 loss = recon_error + vq_output["loss"]
-perplexity = vq_output["perplexity"] 
+perplexity = vq_output["perplexity"]
 
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
+optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=learning_rate)
 train_op = optimizer.minimize(loss)
 
 #--- Train process - PixelCNN for priors
@@ -111,7 +113,7 @@ loss_pixelcnn = pixelcnn_output["loss_pixelcnn"]
 sampled_pixelcnn_train = pixelcnn_output["sampled_pixelcnn"]
 
 # optimizer_pixelcnn = tf.train.RMSPropOptimizer(learning_rate_pixelcnn).minimize(loss_pixelcnn)
-trainer_pixelcnn = tf.train.RMSPropOptimizer(learning_rate=learning_rate_pixelcnn)
+trainer_pixelcnn = tf.compat.v1.train.RMSPropOptimizer(learning_rate=learning_rate_pixelcnn)
 gradients_pixelcnn = trainer_pixelcnn.compute_gradients(loss_pixelcnn)
 clipped_gradients_pixelcnn = map(lambda gv: gv if gv[0] is None else [tf.clip_by_value(gv[0], -grad_clip_pixelcnn, grad_clip_pixelcnn), gv[1]], gradients_pixelcnn)
 # clipped_gradients_pixelcnn = [(tf.clip_by_value(_[0], -grad_clip_pixelcnn, grad_clip_pixelcnn), _[1]) for _ in gradients_pixelcnn]
@@ -130,8 +132,8 @@ test_recon_near = vqvae_nets.decoder(test_vq_output["near_quantized"], num_hidde
 #--------------------------------------------------------------------------
 # Train
 
-init = tf.global_variables_initializer()
-sess = tf.Session()
+init = tf.compat.v1.global_variables_initializer()
+sess = tf.compat.v1.Session()
 sess.run(init)
 
 #--- Train vqvae1
@@ -142,7 +144,7 @@ for i in range(num_training_updates):
   train_data_batch = sess.run(train_dataset_batch_tf)
   train_feed_dict = {x: train_data_batch}
   train_res = sess.run([train_op, x_recon, recon_error, loss, perplexity], feed_dict=train_feed_dict)
-  
+
   train_res_recon_error.append(train_res[2])
   train_res_loss.append(train_res[3])
   train_res_perplexity.append(train_res[4])
@@ -229,7 +231,7 @@ for i in range(num_training_updates_pixelcnn):
                 next_sample = sess.run(sampled_pixelcnn_train, feed_dict=data_dict)
                 samples[:, j, k] = next_sample[:, j, k]
         samples.astype(np.int32)
-        
+
         feed_dict = {x: train_data_batch, sampled_code_pixelcnn: samples}
         x_recon_pixelcnn_res = sess.run(x_recon_pixelcnn, feed_dict=feed_dict)
 
